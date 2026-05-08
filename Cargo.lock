@@ -897,6 +897,7 @@ version = "0.8.45"
 dependencies = [
  "anyhow",
  "codewhale-protocol",
+ "globset",
  "serde",
 ]
 
