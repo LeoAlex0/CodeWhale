@@ -269,12 +269,11 @@ fn redirect_stderr_to(file: &File) -> Result<libc::c_int> {
 #[cfg(windows)]
 fn redirect_stderr_to(file: &File) -> Result<windows::Win32::Foundation::HANDLE> {
     use std::os::windows::io::AsRawHandle;
-    use windows::Win32::System::Console::{
-        GetStdHandle, SetStdHandle, STD_ERROR_HANDLE,
-    };
+    use windows::Win32::System::Console::{GetStdHandle, STD_ERROR_HANDLE, SetStdHandle};
     // SAFETY: GetStdHandle is always available; returns INVALID_HANDLE_VALUE
     // on failure or null-like handles for console-less processes.
-    let saved = unsafe { GetStdHandle(STD_ERROR_HANDLE) };
+    let saved =
+        unsafe { GetStdHandle(STD_ERROR_HANDLE) }.context("GetStdHandle(STD_ERROR_HANDLE)")?;
     if saved.is_invalid() {
         return Err(anyhow::anyhow!("GetStdHandle(STD_ERROR_HANDLE) failed"));
     }
@@ -282,7 +281,8 @@ fn redirect_stderr_to(file: &File) -> Result<windows::Win32::Foundation::HANDLE>
     // SAFETY: SetStdHandle redirects stderr. We save the original handle
     // so the guard can restore it on drop.
     unsafe {
-        let _ = SetStdHandle(STD_ERROR_HANDLE, windows::Win32::Foundation::HANDLE(target as isize));
+        SetStdHandle(STD_ERROR_HANDLE, windows::Win32::Foundation::HANDLE(target))
+            .context("SetStdHandle(STD_ERROR_HANDLE)")?;
     }
     Ok(saved)
 }
