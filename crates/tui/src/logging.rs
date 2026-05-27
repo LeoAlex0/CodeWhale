@@ -6,10 +6,42 @@ use colored::Colorize;
 
 use crate::palette;
 static VERBOSE: AtomicBool = AtomicBool::new(false);
+static REQUESTED_VERBOSE: AtomicBool = AtomicBool::new(false);
+
+fn alt_screen_verbose_state(
+    requested_verbose: bool,
+    in_alt_screen: bool,
+    is_windows: bool,
+) -> bool {
+    if is_windows && in_alt_screen {
+        false
+    } else {
+        requested_verbose
+    }
+}
 
 /// Enable or disable verbose logging output.
 pub fn set_verbose(enabled: bool) {
+    REQUESTED_VERBOSE.store(enabled, Ordering::SeqCst);
     VERBOSE.store(enabled, Ordering::SeqCst);
+}
+
+/// Suppress verbose CLI logging while the TUI owns the alt-screen.
+pub fn suppress_for_tui_alt_screen() {
+    let requested = REQUESTED_VERBOSE.load(Ordering::SeqCst);
+    VERBOSE.store(
+        alt_screen_verbose_state(requested, true, cfg!(windows)),
+        Ordering::SeqCst,
+    );
+}
+
+/// Restore the user's requested verbosity after leaving the alt-screen.
+pub fn restore_after_tui_alt_screen() {
+    let requested = REQUESTED_VERBOSE.load(Ordering::SeqCst);
+    VERBOSE.store(
+        alt_screen_verbose_state(requested, false, cfg!(windows)),
+        Ordering::SeqCst,
+    );
 }
 
 /// Return true when `DEEPSEEK_LOG_LEVEL` requests verbose output.
@@ -73,5 +105,23 @@ mod tests {
         ));
         assert!(!log_value_enables_verbose("warn"));
         assert!(!log_value_enables_verbose("codewhale_tui=off"));
+    }
+
+    #[test]
+    fn alt_screen_verbose_state_suppresses_verbose_on_windows() {
+        assert!(!alt_screen_verbose_state(true, true, true));
+        assert!(!alt_screen_verbose_state(false, true, true));
+    }
+
+    #[test]
+    fn alt_screen_verbose_state_restores_requested_state_off_alt_screen() {
+        assert!(alt_screen_verbose_state(true, false, true));
+        assert!(!alt_screen_verbose_state(false, false, true));
+    }
+
+    #[test]
+    fn alt_screen_verbose_state_is_noop_off_windows() {
+        assert!(alt_screen_verbose_state(true, true, false));
+        assert!(!alt_screen_verbose_state(false, true, false));
     }
 }
