@@ -821,6 +821,20 @@ pub fn build_diff_preview(
                     let resolved = resolve_workspace_path(path, workspace);
                     let old_content = match read_file_for_diff(&resolved, path) {
                         PreviewFileRead::Content(content) => content,
+                        PreviewFileRead::Skipped(ApprovalDiffPreview::SkippedLargeFile {
+                            path,
+                            size,
+                            limit,
+                        }) => {
+                            if !out.is_empty() {
+                                out.push('\n');
+                            }
+                            out.push_str(&format!("diff --git a/{path} b/{path}\n"));
+                            out.push_str(&format!(
+                                "  (diff preview skipped - file is {size} bytes, limit is {limit} bytes)\n"
+                            ));
+                            continue;
+                        }
                         PreviewFileRead::Skipped(preview) => return Some(preview),
                         PreviewFileRead::Unreadable => String::new(),
                     };
@@ -1053,7 +1067,6 @@ impl ApprovalView {
     fn scroll_diff_up(&mut self, amount: usize) {
         self.diff_scroll
             .set(self.diff_scroll.get().saturating_sub(amount));
-        self.pending_confirm = None;
     }
 
     fn scroll_diff_down(&mut self, amount: usize) {
@@ -1061,7 +1074,6 @@ impl ApprovalView {
         let max_scroll = self.diff_total_lines.get().saturating_sub(visible);
         self.diff_scroll
             .set((self.diff_scroll.get() + amount).min(max_scroll));
-        self.pending_confirm = None;
     }
 
     fn diff_page_height(&self) -> usize {
@@ -2089,6 +2101,51 @@ mod tests {
     }
 
     #[test]
+    fn test_diff_preview_apply_patch_changes_array_keeps_diffs_when_one_file_skips() {
+        let workspace = std::env::temp_dir().join("deepseek_test_apply_patch_changes_large");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let a = workspace.join("a.txt");
+        let large = workspace.join("large.txt");
+        std::fs::write(&a, "old\n").unwrap();
+        std::fs::write(&large, "x".repeat((DIFF_PREVIEW_MAX_BYTES + 1) as usize)).unwrap();
+
+        let params = json!({
+            "changes": [
+                {"path": "a.txt", "content": "new\n"},
+                {"path": "large.txt", "content": "replacement\n"},
+                {"path": "b.txt", "content": "added\n"},
+            ]
+        });
+        let request = ApprovalRequest::new_with_workspace(
+            "test-id",
+            "apply_patch",
+            "Apply patch",
+            &params,
+            "test_key",
+            Some(workspace.display().to_string()),
+        );
+        let preview = request
+            .diff_preview()
+            .expect("changes array should keep a partial preview");
+        match preview {
+            ApprovalDiffPreview::Diff { text, .. } => {
+                assert!(text.contains("diff --git a/a.txt b/a.txt"), "{text}");
+                assert!(text.contains("-old"), "{text}");
+                assert!(text.contains("+new"), "{text}");
+                assert!(
+                    text.contains("diff --git a/large.txt b/large.txt"),
+                    "{text}"
+                );
+                assert!(text.contains("diff preview skipped"), "{text}");
+                assert!(text.contains("diff --git a/b.txt b/b.txt"), "{text}");
+                assert!(text.contains("+added"), "{text}");
+            }
+            other => panic!("expected Diff for partial changes preview, got {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(&workspace);
+    }
+
+    #[test]
     fn test_build_detail_lines_apply_patch_changes_without_top_level_path() {
         let params = json!({
             "changes": [
@@ -2595,16 +2652,20 @@ mod tests {
     fn up_down_scroll_diff_without_changing_selection() {
         let mut view = ApprovalView::new(destructive_request());
         let before = view.selected();
+        view.handle_key(create_key_event(KeyCode::Char('y')));
+        assert_eq!(view.pending_confirm(), Some(ApprovalOption::ApproveOnce));
         assert!(matches!(
             view.handle_key(create_key_event(KeyCode::Up)),
             ViewAction::None
         ));
         assert_eq!(view.selected(), before);
+        assert_eq!(view.pending_confirm(), Some(ApprovalOption::ApproveOnce));
         assert!(matches!(
             view.handle_key(create_key_event(KeyCode::Down)),
             ViewAction::None
         ));
         assert_eq!(view.selected(), before);
+        assert_eq!(view.pending_confirm(), Some(ApprovalOption::ApproveOnce));
     }
 
     #[test]
