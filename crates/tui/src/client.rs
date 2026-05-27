@@ -1338,6 +1338,7 @@ mod tests {
             stream: None,
             temperature: None,
             top_p: None,
+                response_format: None,
         };
 
         let openai = build_chat_messages_for_request_and_provider(&request, ApiProvider::Openai);
@@ -1616,6 +1617,7 @@ mod tests {
             stream: None,
             temperature: None,
             top_p: None,
+                response_format: None,
         };
 
         let out = build_chat_messages_for_request(&request);
@@ -1672,6 +1674,7 @@ mod tests {
             stream: None,
             temperature: None,
             top_p: None,
+                response_format: None,
         };
 
         let out = build_chat_messages_for_request(&request);
@@ -1724,6 +1727,7 @@ mod tests {
             stream: None,
             temperature: None,
             top_p: None,
+                response_format: None,
         };
 
         let inspection = inspect_prompt_for_request(&request);
@@ -1786,6 +1790,7 @@ mod tests {
                 stream: None,
                 temperature: None,
                 top_p: None,
+                response_format: None,
             }
         }
 
@@ -1848,6 +1853,7 @@ mod tests {
             stream: None,
             temperature: None,
             top_p: None,
+                response_format: None,
         };
 
         let first = inspect_prompt_for_request(&request);
@@ -1903,6 +1909,7 @@ mod tests {
             stream: Some(true),
             temperature: Some(0.7),
             top_p: None,
+                response_format: None,
         };
 
         let warmup = build_cache_warmup_request(&request);

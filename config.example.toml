@@ -515,6 +515,19 @@ default_text_model = "deepseek-ai/deepseek-v4-pro"
 #                         # monorepos.
 
 # ─────────────────────────────────────────────────────────────────────────────────
+# Verification Gate (#2231)
+# ─────────────────────────────────────────────────────────────────────────────────
+# After every side-effect tool call (write_file, edit_file, apply_patch,
+# exec_shell), the engine runs a deterministic re-check before the result
+# enters the session message stream. If the re-check contradicts the claim,
+# the result is annotated with [VERIFY FAIL].
+
+# [verification]
+# enabled = true         # Enable the closed-loop verification gate
+# skip_tools = []        # Tools to skip verification for
+# max_retries = 1        # Max verification attempts per tool (best-effort)
+
+# ─────────────────────────────────────────────────────────────────────────────────
 # LSP Diagnostics (post-edit) (#136)
 # ─────────────────────────────────────────────────────────────────────────────────
 # After every successful file edit (`edit_file`, `apply_patch`, `write_file`),

@@ -302,6 +302,7 @@ impl Engine {
                 stream: Some(true),
                 temperature: None,
                 top_p: None,
+                response_format: None,
             };
 
             // Stream the response. Keep the request around (cloned into the
@@ -1877,6 +1878,7 @@ impl Engine {
                             .and_then(serde_json::Value::as_bool)
                             .unwrap_or(true);
                         let output_content = output.content;
+                        let output_success = output.success;
 
                         tool_call.set_result(output_content.clone(), duration);
                         self.session.working_set.observe_tool_call(
@@ -1890,17 +1892,66 @@ impl Engine {
                         // this on success — failed edits leave the file
                         // untouched, so polling for diagnostics would just
                         // surface stale state.
-                        if output.success && tool_was_executed {
+                        if output_success && tool_was_executed {
                             self.run_post_edit_lsp_hook(&outcome.name, &tool_input)
                                 .await;
                         }
+
+                        // CLOSED-LOOP: verification gate — re-check side-effect
+                        // claims before the result enters the session stream.
+                        let (verify_verdict, verify_annotation) = if self
+                            .config
+                            .verification_enabled
+                            && output_success
+                            && tool_was_executed
+                        {
+                            let (verdict, annotation) = verify::run_verification(
+                                &outcome.name,
+                                &tool_input,
+                                &self.session.workspace,
+                            );
+                            (verdict, annotation)
+                        } else {
+                            (verify::VerifyVerdict::Skipped, String::new())
+                        };
+
+                        // Record the verdict for session-level audit.
+                        self.session.verification_ledger.push(verify::VerifyRecord {
+                            tool_id: outcome.id.clone(),
+                            tool_name: outcome.name.clone(),
+                            verdict: verify_verdict.clone(),
+                            elapsed_ms: 0,
+                            ts: Utc::now().timestamp(),
+                        });
+                        // Bounded ledger: keep at most 200 entries.
+                        const MAX_VERIFICATION_RECORDS: usize = 200;
+                        if self.session.verification_ledger.len() > MAX_VERIFICATION_RECORDS
+                        {
+                            let excess =
+                                self.session.verification_ledger.len() - MAX_VERIFICATION_RECORDS;
+                            self.session.verification_ledger.drain(0..excess);
+                        }
+
+                        // Annotate the tool result with the verification outcome.
+                        let annotated_content = if verify_annotation.is_empty() {
+                            output_for_context
+                        } else {
+                            format!("{output_for_context}{verify_annotation}")
+                        };
+
+                        let is_error = if matches!(verify_verdict, verify::VerifyVerdict::Fail { .. })
+                        {
+                            Some(true)
+                        } else {
+                            None
+                        };
 
                         self.add_session_message(Message {
                             role: "user".to_string(),
                             content: vec![ContentBlock::ToolResult {
                                 tool_use_id: outcome.id,
-                                content: output_for_context,
-                                is_error: None,
+                                content: annotated_content,
+                                is_error,
                                 content_blocks: None,
                             }],
                         })

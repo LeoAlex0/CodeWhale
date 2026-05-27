@@ -733,6 +733,7 @@ fn build_engine_config(app: &App, config: &Config) -> EngineConfig {
         search_provider: config.search_provider(),
         search_api_key: config.search.as_ref().and_then(|s| s.api_key.clone()),
         tools_always_load: config.tools_always_load(),
+        verification_enabled: true,
     }
 }
 
@@ -3796,6 +3797,7 @@ async fn run_cache_warmup(app: &App, config: &Config) -> Result<Usage> {
         stream: None,
         temperature: None,
         top_p: None,
+                response_format: None,
     };
     let warmup = build_cache_warmup_request(&request);
     let response =

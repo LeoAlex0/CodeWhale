@@ -1179,6 +1179,7 @@ async fn auto_route_flash_recommendation(
         stream: Some(false),
         temperature: Some(0.0),
         top_p: None,
+                response_format: None,
     };
 
     let response =
