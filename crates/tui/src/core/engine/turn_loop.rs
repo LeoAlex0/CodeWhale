@@ -2015,28 +2015,130 @@ impl Engine {
                         .await;
                     }
                     Err(e) => {
-                        match loop_guard.record_outcome(&outcome.name, false) {
-                            OutcomeDecision::Continue => {}
-                            OutcomeDecision::Warn(message) => {
-                                crate::logging::warn(message.clone());
-                                let _ = self.tx_event.send(Event::status(message)).await;
-                            }
-                            OutcomeDecision::Halt(message) => {
-                                loop_guard_halt.get_or_insert(message);
+                        // Auto-correction: if edit_file failed with a
+                        // "search string not found" error, try fuzzy matching
+                        // to find the closest real text and retry once.
+                        let error_str = e.to_string();
+                        let mut corrected = false;
+                        if outcome.name == "edit_file"
+                            && verify::correct_edit_file_input(
+                                &tool_input,
+                                &error_str,
+                                &self.session.workspace,
+                            )
+                            .is_some()
+                        {
+                            let corrected_input = verify::correct_edit_file_input(
+                                &tool_input,
+                                &error_str,
+                                &self.session.workspace,
+                            )
+                            .unwrap();
+
+                            // Retry with the corrected search string.
+                            match Engine::retry_file_tool(
+                                tool_exec_lock.clone(),
+                                &outcome.name,
+                                corrected_input.clone(),
+                                self.tx_event.clone(),
+                                tool_registry,
+                                mcp_pool.clone(),
+                            )
+                            .await
+                            {
+                                Ok((retry_result, retry_ok)) if retry_ok => {
+                                    // Retry succeeded — treat as success.
+                                    corrected = true;
+                                    emit_tool_audit(json!({
+                                        "event": "tool.result",
+                                        "tool_id": outcome.id.clone(),
+                                        "tool_name": outcome.name.clone(),
+                                        "success": true,
+                                        "corrected": true,
+                                        "fuzzy_correction": corrected_input
+                                            .get("fuzzy_correction")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or(""),
+                                    }));
+                                    let mut corrected_output =
+                                        compact_tool_result_for_context(
+                                            &self.session.model,
+                                            &outcome.name,
+                                            &retry_result,
+                                        );
+                                    // Verification for corrected result.
+                                    let (v_verdict, _v_annotation) =
+                                        verify::run_verification(
+                                            &outcome.name,
+                                            &corrected_input,
+                                            &self.session.workspace,
+                                        );
+                                    if matches!(v_verdict, verify::VerifyVerdict::Pass)
+                                    {
+                                        corrected_output = format!(
+                                            "{corrected_output}{}",
+                                            verify::retry_annotation(1)
+                                        );
+                                    }
+                                    tool_call.set_result(
+                                        corrected_output.clone(),
+                                        duration,
+                                    );
+                                    self.session.working_set.observe_tool_call(
+                                        &tool_name_for_ws,
+                                        &corrected_input,
+                                        Some(&corrected_output),
+                                        &self.session.workspace,
+                                    );
+                                    self.add_session_message(Message {
+                                        role: "user".to_string(),
+                                        content: vec![ContentBlock::ToolResult {
+                                            tool_use_id: outcome.id,
+                                            content: corrected_output,
+                                            is_error: None,
+                                            content_blocks: None,
+                                        }],
+                                    })
+                                    .await;
+                                    // Skip the normal error path.
+                                    continue;
+                                }
+                                _ => {
+                                    // Retry also failed — fall through to
+                                    // normal error handling. Future: try
+                                    // Fin Flash here (Option B).
+                                }
                             }
                         }
-                        let envelope: ErrorEnvelope = e.clone().into();
-                        emit_tool_audit(json!({
-                            "event": "tool.result",
-                            "tool_id": outcome.id.clone(),
-                            "tool_name": outcome.name.clone(),
-                            "success": false,
-                            "error": e.to_string(),
-                            "category": envelope.category.to_string(),
-                            "severity": envelope.severity.to_string(),
-                        }));
-                        step_error_count += 1;
-                        step_error_categories.push(envelope.category);
+
+                        if !corrected {
+                            match loop_guard.record_outcome(&outcome.name, false) {
+                                OutcomeDecision::Continue => {}
+                                OutcomeDecision::Warn(message) => {
+                                    crate::logging::warn(message.clone());
+                                    let _ = self.tx_event.send(Event::status(message)).await;
+                                }
+                                OutcomeDecision::Halt(message) => {
+                                    loop_guard_halt.get_or_insert(message);
+                                }
+                            }
+                        }
+                        if corrected {
+                            // Already handled above — skip error recording.
+                        } else {
+                            let envelope: ErrorEnvelope = e.clone().into();
+                            emit_tool_audit(json!({
+                                "event": "tool.result",
+                                "tool_id": outcome.id.clone(),
+                                "tool_name": outcome.name.clone(),
+                                "success": false,
+                                "error": e.to_string(),
+                                "category": envelope.category.to_string(),
+                                "severity": envelope.severity.to_string(),
+                            }));
+                            step_error_count += 1;
+                            step_error_categories.push(envelope.category);
+                        }
                         let error = format_tool_error(&e, &outcome.name);
                         tool_call.set_error(error.clone(), duration);
                         self.session.working_set.observe_tool_call(

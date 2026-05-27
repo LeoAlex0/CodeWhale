@@ -189,6 +189,211 @@ fn inline_verify_file_tool(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Fuzzy search-string correction for edit_file retries
+// ---------------------------------------------------------------------------
+
+/// Best match found by the fuzzy matcher, with a confidence score.
+#[derive(Debug, Clone)]
+pub struct FuzzyMatch {
+    /// The actual text from the file that best matches the search string.
+    pub text: String,
+    /// Similarity score: 1.0 = exact match, 0.0 = completely different.
+    pub score: f64,
+    /// Line number (1-based) where the match was found.
+    pub line: usize,
+}
+
+/// Minimum similarity threshold for accepting a fuzzy match as a correction.
+/// Below this, the match is too uncertain to use — fall back to Fin (Flash).
+const FUZZY_MIN_SIMILARITY: f64 = 0.6;
+
+/// Try to find the closest matching text in a file for a failed edit_file search.
+///
+/// When edit_file fails because the search string doesn't match, this reads the
+/// file and finds the line (or multi-line block) closest to the failed search.
+/// Returns `None` if the file can't be read or no match exceeds the threshold.
+pub fn fuzzy_correct_search(
+    file_path: &Path,
+    failed_search: &str,
+    workspace: &Path,
+) -> Option<FuzzyMatch> {
+    let resolved = if file_path.is_absolute() {
+        file_path.to_path_buf()
+    } else {
+        workspace.join(file_path)
+    };
+
+    let content = std::fs::read_to_string(&resolved).ok()?;
+    if content.is_empty() {
+        return None;
+    }
+
+    let search_trimmed = failed_search.trim();
+    if search_trimmed.is_empty() {
+        return None;
+    }
+
+    // Try exact match first (fast path — the retry already handled the write).
+    if content.contains(search_trimmed) {
+        let line = content
+            .lines()
+            .position(|l| l.contains(search_trimmed))
+            .map(|i| i + 1)
+            .unwrap_or(1);
+        return Some(FuzzyMatch {
+            text: search_trimmed.to_string(),
+            score: 1.0,
+            line,
+        });
+    }
+
+    // Fuzzy: compare search string against each line.
+    let search_lower = search_trimmed.to_lowercase();
+    let mut best: Option<FuzzyMatch> = None;
+
+    for (i, line) in content.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        // Normalized Levenshtein similarity
+        let sim = normalized_similarity(search_trimmed, line);
+        let sim_lower = if search_lower != *search_trimmed {
+            normalized_similarity(&search_lower, &line.to_lowercase())
+        } else {
+            sim
+        };
+        let best_sim = sim.max(sim_lower);
+
+        match &best {
+            Some(current) if best_sim <= current.score => continue,
+            _ => {
+                best = Some(FuzzyMatch {
+                    text: line.to_string(),
+                    score: best_sim,
+                    line: i + 1,
+                });
+            }
+        }
+    }
+
+    // Also try multi-line windows (2-5 lines) for search strings with newlines.
+    if search_trimmed.contains('\n') {
+        let lines: Vec<&str> = content.lines().collect();
+        let search_lines: Vec<&str> = search_trimmed.lines().collect();
+        for window_size in search_lines.len()..=(search_lines.len() + 2).min(lines.len()) {
+            for start in 0..=lines.len().saturating_sub(window_size) {
+                let window = lines[start..start + window_size].join("\n");
+                let sim = normalized_similarity(search_trimmed, &window);
+                match &best {
+                    Some(current) if sim <= current.score => continue,
+                    _ => {
+                        best = Some(FuzzyMatch {
+                            text: window,
+                            score: sim,
+                            line: start + 1,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    best.filter(|m| m.score >= FUZZY_MIN_SIMILARITY)
+}
+
+/// Normalized Levenshtein similarity: 1.0 = identical, 0.0 = completely different.
+fn normalized_similarity(a: &str, b: &str) -> f64 {
+    if a == b {
+        return 1.0;
+    }
+    let max_len = a.len().max(b.len());
+    if max_len == 0 {
+        return 1.0;
+    }
+    let dist = levenshtein_distance(a, b);
+    1.0 - (dist as f64 / max_len as f64)
+}
+
+/// Compute Levenshtein (edit) distance between two strings.
+fn levenshtein_distance(a: &str, b: &str) -> usize {
+    let a_chars: Vec<char> = a.chars().collect();
+    let b_chars: Vec<char> = b.chars().collect();
+    let a_len = a_chars.len();
+    let b_len = b_chars.len();
+
+    if a_len == 0 {
+        return b_len;
+    }
+    if b_len == 0 {
+        return a_len;
+    }
+
+    let mut prev: Vec<usize> = (0..=b_len).collect();
+    let mut curr = vec![0usize; b_len + 1];
+
+    for i in 1..=a_len {
+        curr[0] = i;
+        for j in 1..=b_len {
+            let cost = if a_chars[i - 1] == b_chars[j - 1] { 0 } else { 1 };
+            curr[j] = (prev[j] + 1)        // deletion
+                .min(curr[j - 1] + 1)       // insertion
+                .min(prev[j - 1] + cost);   // substitution
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+
+    prev[b_len]
+}
+
+/// Attempt to correct a failed edit_file search string and retry the operation.
+///
+/// Called when edit_file fails with a "search string not found" error.
+/// First tries deterministic fuzzy matching (free). If that fails, returns
+/// `None` — the caller should fall back to the Flash inner-loop (Option B).
+///
+/// Returns a corrected tool input with the fuzzy-matched search string,
+/// or `None` if no correction is possible.
+pub fn correct_edit_file_input(
+    original_input: &serde_json::Value,
+    error_message: &str,
+    workspace: &Path,
+) -> Option<serde_json::Value> {
+    // Only intercept "not found" / "no match" errors.
+    let err_lower = error_message.to_lowercase();
+    if !err_lower.contains("not found")
+        && !err_lower.contains("no match")
+        && !err_lower.contains("search string")
+        && !err_lower.contains("could not find")
+    {
+        return None;
+    }
+
+    let path_str = original_input.get("path").and_then(|v| v.as_str())?;
+    let search_str = original_input.get("search").and_then(|v| v.as_str())?;
+
+    let fuzzy = fuzzy_correct_search(Path::new(path_str), search_str, workspace)?;
+
+    // Build corrected input with the fuzzy-matched text as the new search string.
+    let mut corrected = original_input.clone();
+    if let Some(obj) = corrected.as_object_mut() {
+        obj.insert("search".to_string(), serde_json::Value::String(fuzzy.text.clone()));
+        // Add a note so the model understands the correction.
+        obj.insert(
+            "fuzzy_correction".to_string(),
+            serde_json::Value::String(format!(
+                "search string auto-corrected (score {:.0}%, line {}): \"{}\" → \"{}\"",
+                fuzzy.score * 100.0,
+                fuzzy.line,
+                search_str,
+                fuzzy.text
+            )),
+        );
+    }
+    Some(corrected)
+}
+
 /// Build a retry-success annotation for the session message stream.
 pub fn retry_annotation(retry_count: u32) -> String {
     if retry_count == 0 {
@@ -430,5 +635,55 @@ mod tests {
         assert!(!cfg.enabled);
         assert!(cfg.skip_tools.is_empty());
         assert_eq!(cfg.max_retries, 1);
+    }
+
+    #[test]
+    fn fuzzy_correct_finds_exact_match() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let file_path = tmp.path().join("test.rs");
+        std::fs::write(&file_path, "fn main() {\n    println!(\"hello\");\n}").expect("write");
+
+        let result = fuzzy_correct_search(&file_path, "fn main() {", tmp.path());
+        assert!(result.is_some());
+        let m = result.unwrap();
+        assert!(m.score > 0.99);
+        assert!(m.text.contains("fn main()"));
+    }
+
+    #[test]
+    fn fuzzy_correct_handles_whitespace_diff() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let file_path = tmp.path().join("test.rs");
+        std::fs::write(&file_path, "fn main()  {\n    println!(\"hello\");\n}").expect("write");
+
+        // Search with single space — should still find the double-space line.
+        let result = fuzzy_correct_search(&file_path, "fn main() {", tmp.path());
+        assert!(result.is_some());
+        let m = result.unwrap();
+        assert!(m.score >= 0.6, "score {} below threshold", m.score);
+    }
+
+    #[test]
+    fn fuzzy_correct_returns_none_for_unrelated_search() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let file_path = tmp.path().join("test.rs");
+        std::fs::write(&file_path, "fn main() {\n    println!(\"hello\");\n}").expect("write");
+
+        // Completely unrelated text should return None.
+        let result = fuzzy_correct_search(
+            &file_path,
+            "completely different text that doesn't exist anywhere",
+            tmp.path(),
+        );
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn levenshtein_distance_correct() {
+        assert_eq!(levenshtein_distance("kitten", "sitting"), 3);
+        assert_eq!(levenshtein_distance("", "abc"), 3);
+        assert_eq!(levenshtein_distance("abc", ""), 3);
+        assert_eq!(levenshtein_distance("abc", "abc"), 0);
+        assert_eq!(levenshtein_distance("rust", "rust "), 1);
     }
 }
