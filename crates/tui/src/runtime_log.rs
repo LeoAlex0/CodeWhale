@@ -281,7 +281,7 @@ fn redirect_stderr_to(file: &File) -> Result<windows::Win32::Foundation::HANDLE>
     // SAFETY: SetStdHandle redirects stderr. We save the original handle
     // so the guard can restore it on drop.
     unsafe {
-        SetStdHandle(STD_ERROR_HANDLE, windows::Win32::Foundation::HANDLE(target as isize))
+        SetStdHandle(STD_ERROR_HANDLE, windows::Win32::Foundation::HANDLE(target))
             .map_err(|e| anyhow::anyhow!("SetStdHandle(STD_ERROR_HANDLE) failed: {e}"))?;
     }
     Ok(saved)
