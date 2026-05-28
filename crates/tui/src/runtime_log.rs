@@ -58,6 +58,8 @@ pub struct TuiLogGuard {
     saved_stderr_fd: Option<libc::c_int>,
     #[cfg(windows)]
     saved_stderr_handle: Option<windows::Win32::Foundation::HANDLE>,
+    #[cfg(windows)]
+    redirected_stderr_handle: Option<windows::Win32::Foundation::HANDLE>,
     _file: File,
     // Exposed via `log_path()` for diagnostics (e.g. `/doctor`,
     // `--print-log-path`). Currently no caller — keep the accessor
@@ -101,6 +103,14 @@ impl Drop for TuiLogGuard {
                     windows::Win32::System::Console::STD_ERROR_HANDLE,
                     handle,
                 );
+            }
+        }
+        // Close the duplicated handle that was serving as the redirected
+        // stderr target. This is safe because `SetStdHandle` above already
+        // restored the original handle, so nothing references this one.
+        if let Some(dup) = self.redirected_stderr_handle.take() {
+            unsafe {
+                let _ = windows::Win32::Foundation::CloseHandle(dup);
             }
         }
     }
@@ -164,13 +174,18 @@ pub fn init() -> Result<TuiLogGuard> {
     #[cfg(unix)]
     let saved_stderr_fd = redirect_stderr_to(&file).ok();
     #[cfg(windows)]
-    let saved_stderr_handle = redirect_stderr_to(&file).ok();
+    let (saved_stderr_handle, redirected_stderr_handle) = match redirect_stderr_to(&file) {
+        Ok((saved, dup)) => (Some(saved), Some(dup)),
+        Err(_) => (None, None),
+    };
 
     Ok(TuiLogGuard {
         #[cfg(unix)]
         saved_stderr_fd,
         #[cfg(windows)]
         saved_stderr_handle,
+        #[cfg(windows)]
+        redirected_stderr_handle,
         _file: file,
         log_path,
     })
@@ -267,9 +282,19 @@ fn redirect_stderr_to(file: &File) -> Result<libc::c_int> {
 }
 
 #[cfg(windows)]
-fn redirect_stderr_to(file: &File) -> Result<windows::Win32::Foundation::HANDLE> {
+fn redirect_stderr_to(
+    file: &File,
+) -> Result<(
+    windows::Win32::Foundation::HANDLE,
+    windows::Win32::Foundation::HANDLE,
+)> {
     use std::os::windows::io::AsRawHandle;
-    use windows::Win32::System::Console::{GetStdHandle, STD_ERROR_HANDLE, SetStdHandle};
+    use windows::Win32::Foundation::{
+        CloseHandle, DuplicateHandle, DUPLICATE_SAME_ACCESS, HANDLE,
+    };
+    use windows::Win32::System::Console::{GetStdHandle, SetStdHandle, STD_ERROR_HANDLE};
+    use windows::Win32::System::Threading::GetCurrentProcess;
+
     // SAFETY: GetStdHandle is always available; returns INVALID_HANDLE_VALUE
     // on failure or null-like handles for console-less processes.
     let saved =
@@ -277,14 +302,28 @@ fn redirect_stderr_to(file: &File) -> Result<windows::Win32::Foundation::HANDLE>
     if saved.is_invalid() {
         return Err(anyhow::anyhow!("GetStdHandle(STD_ERROR_HANDLE) failed"));
     }
-    let target = file.as_raw_handle();
-    // SAFETY: SetStdHandle redirects stderr. We save the original handle
-    // so the guard can restore it on drop.
+
+    // Duplicate the file handle so the redirected stderr owns an
+    // independent HANDLE — mirroring the Unix path's `libc::dup`.
+    // Without this, `_file` and stderr would alias the same HANDLE;
+    // a rogue `CloseHandle` on stderr would silently invalidate `_file`.
+    let raw = HANDLE(file.as_raw_handle());
+    let process = unsafe { GetCurrentProcess() };
+    let mut dup = HANDLE::default();
     unsafe {
-        SetStdHandle(STD_ERROR_HANDLE, windows::Win32::Foundation::HANDLE(target))
-            .map_err(|e| anyhow::anyhow!("SetStdHandle(STD_ERROR_HANDLE) failed: {e}"))?;
+        DuplicateHandle(process, raw, process, &mut dup, 0, false, DUPLICATE_SAME_ACCESS)
+            .context("DuplicateHandle for stderr redirect")?;
     }
-    Ok(saved)
+
+    // SAFETY: SetStdHandle redirects stderr to the duplicated handle.
+    // We save the original handle so the guard can restore it on drop.
+    unsafe {
+        if let Err(e) = SetStdHandle(STD_ERROR_HANDLE, dup) {
+            let _ = CloseHandle(dup);
+            return Err(anyhow::anyhow!("SetStdHandle(STD_ERROR_HANDLE) failed: {e}"));
+        }
+    }
+    Ok((saved, dup))
 }
 
 #[cfg(test)]
