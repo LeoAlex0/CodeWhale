@@ -242,12 +242,17 @@ jobs:
       - name: Install AArch64 cross-compilation toolchain
         if: matrix.target == 'aarch64-unknown-linux-gnu' && runner.os == 'Linux'
         run: |
+          . /etc/os-release
+          sudo tee /etc/apt/sources.list.d/arm64.sources <<SRC
+          Types: deb
+          URIs: http://ports.ubuntu.com/ubuntu-ports/
+          Suites: ${UBUNTU_CODENAME} ${UBUNTU_CODENAME}-updates ${UBUNTU_CODENAME}-security
+          Components: main universe
+          Architectures: arm64
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+          SRC
           sudo dpkg --add-architecture arm64
-          for i in 1 2 3 4 5; do
-            sudo apt-get update && break
-            echo "apt-get update failed (attempt $i); retrying in 15s"
-            sleep 15
-          done
+          sudo apt-get update -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/arm64.sources -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0
           sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross libdbus-1-dev:arm64 pkg-config
       - name: Build
         shell: bash
