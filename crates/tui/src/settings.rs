@@ -335,7 +335,7 @@ impl Default for Settings {
             bracketed_paste: true,
             paste_burst_detection: true,
             mention_menu_limit: 128,
-            mention_walk_depth: 6,
+            mention_walk_depth: 10,
             mention_menu_behavior: "fuzzy".to_string(),
             show_thinking: true,
             show_tool_details: true,
@@ -1300,7 +1300,7 @@ mod tests {
     fn mention_completion_caps_are_configurable() {
         let mut settings = Settings::default();
         assert_eq!(settings.mention_menu_limit, 128);
-        assert_eq!(settings.mention_walk_depth, 6);
+        assert_eq!(settings.mention_walk_depth, 10);
         assert_eq!(settings.mention_menu_behavior, "fuzzy");
 
         settings

@@ -362,9 +362,11 @@ fn browser_completion_dir_part(dir_part: &str) -> Option<PathBuf> {
 }
 
 /// Default directory depth walked when surfacing file-mention completions.
-/// Mirrors the existing `project_tree` cutoff and keeps Tab snappy in deep
-/// monorepos unless the user opts into a deeper walk.
-pub const DEFAULT_COMPLETIONS_WALK_DEPTH: usize = 6;
+/// Set high enough that conventionally nested source trees (Java/.NET/web
+/// projects routinely reach 7-9 levels) stay reachable, while a `0` override
+/// removes the limit entirely. Keeps Tab snappy in deep monorepos via the
+/// `.gitignore`-aware walk and per-keypress candidate caps (#2488).
+pub const DEFAULT_COMPLETIONS_WALK_DEPTH: usize = 10;
 
 fn normalize_completion_walk_depth(depth: usize) -> Option<usize> {
     if depth == 0 { None } else { Some(depth) }
