@@ -44,6 +44,8 @@ harvest/stewardship commits:
 | #2687 append-only mode/approval prompt | Defer direct merge; draft has compile failures and Plan-mode prompt correctness risks. | Any future harvest must keep stable `message[0]` genuinely mode-agnostic, preserve mode/approval suffixes after capacity replans, and distinguish external overrides from persisted generated prompts. |
 | #2581 provider fallback chain design doc | Manually harvested as `docs/rfcs/2574-provider-fallback-chain.md` because the current PR head has no net file changes. | Keep issue #2574 open for implementation; close/comment on #2581 after the integration branch is public, crediting @idling11 and reporter @hsdbeebou. |
 | #2530 mention depth-cap hint | Already present in the current v0.9 stack as `a97675824` and `29f57665e`. | `cargo test -p codewhale-tui --locked try_autocomplete_file_mention_no_match` passed. |
+| #2513 restore snapshot listing | Manually harvested as `bb39cf169` with explicit `/restore list 101` cap rejection. | `cargo test -p codewhale-tui --locked restore_`; `cargo fmt --all -- --check`; `cargo clippy -p codewhale-tui --locked -- -D warnings` passed. Keep #2494 open because this is only the restore-listing slice. |
+| #2576 PrefixCacheChange first-freeze event | Already present in the current v0.9 stack through `29acb87a9d`. | `cargo test -p codewhale-tui --locked prefix_cache` passed. Do not close until this integration branch is public or merged. |
 
 ## PR Harvest Queue
 
@@ -52,7 +54,7 @@ harvest/stewardship commits:
 | #1865 Pro Plan mode | Conflicting | Likely superseded by HarnessProfile/model-posture lane; review before closing. |
 | #1893 TLS certificate verification toggle | Conflicting | Security-sensitive; review separately, not part of first v0.9 harvest. |
 | #2045 NSIS installer and classroom checklist | Conflicting | Defer unless release-readiness needs Windows installer work. |
-| #2048 live shell output | Mergeable | Review against current exec/tool card behavior before merge. |
+| #2048 live shell output | Mergeable but build-broken/stale | Defer; PR head fails `cargo check -p codewhale-tui --tests --locked`, matches jobs by command prefix, and misses newer `task_shell_start` / `task_shell_wait` cards. Harvest only via a task-id based rewrite. |
 | #2113 independent scroll regions | Conflicting | Defer; likely overlaps current transcript/sidebar work. |
 | #2239 i18n Phase 1-4b | Conflicting | Defer until localization lane. |
 | #2242 typed persistent tool permission rules | Conflicting | Compare with #2721 stabilization and permissions model. |
@@ -72,11 +74,11 @@ harvest/stewardship commits:
 | #2506 provider path suffix overrides | Draft/conflicting | Partly superseded by current provider path-suffix support; verify. |
 | #2507 stream chunk timeout config | Draft/conflicting | Defer unless stabilization needs it. |
 | #2508 configurable path suffix | Conflicting | Likely superseded by #2506/current code; verify linked issue #2089. |
-| #2509 parallel read-only web search | Mergeable | Review for tool-execution scheduler invariants. |
+| #2509 parallel read-only web search | Mergeable / already merged via #2504 | Already present in `origin/main` as `a09af2024`; safe to close as harvested/superseded. |
 | #2510 custom DuckDuckGo endpoint | Draft/mergeable | Low priority; defer unless docs/search lane takes it. |
 | #2511 ToolCallBefore hooks | Conflicting | Defer to hook lifecycle lane. |
 | #2512 custom completion sounds | Draft/conflicting | Defer. |
-| #2513 restore snapshot listing | Draft/mergeable | Review as small UX polish. |
+| #2513 restore snapshot listing | Draft/mergeable | Manually harvested as `bb39cf169` with cap-rejection polish; close/comment after branch is public, leave #2494 open. |
 | #2517 turn_meta tail relocation | Mergeable | Already in high-priority harvest list; review prompt/cache implications. |
 | #2520 prompt base disk cache | Mergeable | Review after #2687 prompt architecture decision. |
 | #2522 hard compaction preserving system segment | Mergeable | Review after #2687 prompt architecture decision. |
@@ -84,7 +86,7 @@ harvest/stewardship commits:
 | #2528 background completion wait | Draft/conflicting | Defer unless failing tests prove need. |
 | #2529 workspace shell opt-in | Draft/conflicting | Review with permissions/sandbox stabilization. |
 | #2530 mention depth cap hint | Draft/mergeable | Already present locally as `a97675824` and `29f57665e`; close/comment after branch is public. |
-| #2576 PrefixCacheChange events | Mergeable | Review after current prefix-cache commits. |
+| #2576 PrefixCacheChange events | Mergeable | Already present locally through `29acb87a9d`; close/comment after branch is public or merged. |
 | #2578 turn_end observer hook | Conflicting | Defer to hook lifecycle lane. |
 | #2579 AppendLog session messages | Conflicting | Defer; large architectural change. |
 | #2581 provider fallback chain design doc | Mergeable / empty diff | Manually harvested into `docs/rfcs/2574-provider-fallback-chain.md`; close original PR after branch is public, keep #2574 open for implementation. |
@@ -122,9 +124,11 @@ Issue count should drop through evidence-backed consolidation, not bulk closing.
 
 ## Immediate Next Actions
 
-1. Review #2048, #2502, #2509, #2513, and #2576 as the next small
-   mergeable candidates.
-2. Prepare public comments for #2708, #2627, #2634, #2636, #2687, and already-harvested performance
-   PRs once this integration branch has a remote review surface.
-3. Start file decomposition Phase 1 only after the PR harvest table has no
+1. Review and harvest #2502 after adding panic-safety coverage for the web_run
+   state split.
+2. Review #2517, #2520, and #2522 for prompt/cache implications after #2687
+   was deferred.
+3. Prepare public comments for #2708, #2513, #2530, #2576, #2581, #2627,
+   #2634, #2636, #2687, and already-harvested performance PRs.
+4. Start file decomposition Phase 1 only after the PR harvest table has no
    unknown high-priority provider/prompt/cache branches.
