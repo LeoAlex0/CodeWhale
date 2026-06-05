@@ -778,6 +778,22 @@ mod tests {
     }
 
     #[test]
+    fn picker_for_ollama_preserves_current_local_tag_without_hosted_static_rows() {
+        let (mut app, _lock) = create_test_app();
+        app.api_provider = crate::config::ApiProvider::Ollama;
+        app.model_ids_passthrough = true;
+        app.model = "qwen2.5-coder:7b".to_string();
+        app.auto_model = false;
+
+        let view = ModelPickerView::new(&app);
+        let model_ids = view.visible_model_ids();
+
+        assert_eq!(model_ids, vec!["auto"]);
+        assert!(view.show_custom_model_row);
+        assert_eq!(view.resolved_model(), "qwen2.5-coder:7b");
+    }
+
+    #[test]
     fn visible_row_window_tracks_selection_in_short_panes() {
         assert_eq!(visible_row_window(0, 16, 8), (0, 8));
         assert_eq!(visible_row_window(7, 16, 8), (3, 11));

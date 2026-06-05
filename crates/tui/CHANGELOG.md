@@ -78,6 +78,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a PR gate marker guard so reopened unapproved PRs do not get duplicate
   intake comments, and clarified that PR reopening should happen after
   allowlist approval is merged.
+- Ollama `/model` completions no longer show hosted DeepSeek API model IDs.
+  The picker preserves the current or saved local Ollama tag, and users can
+  still fetch installed model IDs through `/models` instead of relying on a
+  stale static default (#2742). Thanks @reidliu41 for the focused report and
+  draft fix.
 - Documented the agent and sub-agent stewardship ethos so future automation
   preserves human issue intake, careful PR review, and contributor credit.
 - Moved the TUI Starlark execpolicy parser and PTY support behind non-OHOS

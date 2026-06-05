@@ -788,9 +788,8 @@ pub fn model_completion_names_for_provider(provider: ApiProvider) -> Vec<&'stati
         ApiProvider::Sglang => vec![DEFAULT_SGLANG_MODEL, DEFAULT_SGLANG_FLASH_MODEL],
         ApiProvider::Vllm => vec![DEFAULT_VLLM_MODEL, DEFAULT_VLLM_FLASH_MODEL],
         ApiProvider::Volcengine => vec![DEFAULT_VOLCENGINE_MODEL, DEFAULT_VOLCENGINE_FLASH_MODEL],
-        ApiProvider::Openai | ApiProvider::Atlascloud | ApiProvider::Ollama => {
-            OFFICIAL_DEEPSEEK_MODELS.to_vec()
-        }
+        ApiProvider::Ollama => Vec::new(),
+        ApiProvider::Openai | ApiProvider::Atlascloud => OFFICIAL_DEEPSEEK_MODELS.to_vec(),
     }
 }
 
@@ -7497,6 +7496,13 @@ api_key = "old-openrouter-key"
             model_completion_names_for_provider(ApiProvider::Deepseek),
             vec!["deepseek-v4-pro", "deepseek-v4-flash"]
         );
+    }
+
+    #[test]
+    fn model_completion_names_for_ollama_do_not_promote_static_remote_models() {
+        let models = model_completion_names_for_provider(ApiProvider::Ollama);
+
+        assert!(models.is_empty());
     }
 
     #[test]
