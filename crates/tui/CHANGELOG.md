@@ -161,6 +161,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Authentication failures now include redacted request context such as provider,
+  base URL authority, model, key source, key type, and key fingerprint, making
+  stale provider, endpoint, or API-key state diagnosable without exposing the
+  secret (#2665, #2792). Thanks @mvanhorn for the implementation.
 - Browser-opening actions now compile on non-desktop targets by delegating the
   unsupported-platform error to the shared URL opener instead of hiding the TUI
   wrapper behind a narrower macOS/Linux/Windows cfg. Thanks @ci4ic4 for the
