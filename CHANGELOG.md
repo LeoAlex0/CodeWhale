@@ -33,6 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   grounded objectives, context, sources, critical files, constraints,
   verification, risks, and handoff notes through the transcript card, Plan
   confirmation prompt, `/relay`, fork-state, and saved-session replay.
+- Added the first `codewhale-whaleflow` foundation crate with typed workflow
+  config/IR validation and deterministic phase ordering tests. This preserves
+  the WhaleFlow direction from #2482/#2486 without exposing a runtime
+  `workflow_run` tool until cancellation, replay, and worktree semantics are
+  release-safe. Thanks @AdityaVG13 for the WhaleFlow draft and cost-tracking
+  direction.
 - Added `POST /v1/sessions` for runtime clients to save a completed thread as a
   managed session. The endpoint preserves thread title/model/mode/workspace
   metadata, maps missing threads to 404, and returns 409 instead of snapshotting

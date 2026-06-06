@@ -25,6 +25,7 @@ Current packaging note:
   - `codewhale-core`
   - `codewhale-app-server`
   - `codewhale-tui-core`
+  - `codewhale-whaleflow`
 
 ## Version Coordination
 
@@ -119,20 +120,22 @@ configured.
    `main` and letting `auto-tag.yml` create the tag — see the npm wrapper
    release section below for the `RELEASE_TAG_PAT` requirement).
 4. Publish crates in this order with `./scripts/release/publish-crates.sh publish`:
-   - `codewhale-secrets`
-   - `codewhale-config`
+   - `codewhale-mcp`
    - `codewhale-protocol`
+   - `codewhale-release`
+   - `codewhale-secrets`
    - `codewhale-state`
-   - `codewhale-agent`
+   - `codewhale-tui-core`
+   - `codewhale-whaleflow`
    - `codewhale-execpolicy`
    - `codewhale-hooks`
-   - `codewhale-mcp`
    - `codewhale-tools`
+   - `codewhale-config`
+   - `codewhale-agent`
+   - `codewhale-tui`
    - `codewhale-core`
    - `codewhale-app-server`
-   - `codewhale-tui-core`
    - `codewhale-cli`
-   - `codewhale-tui`
 5. Wait for each published crate version to appear on crates.io before publishing dependents.
 
 The publish helper is idempotent for reruns: already-published crate versions are skipped.
